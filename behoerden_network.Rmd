@@ -1,0 +1,105 @@
+---
+title: "ÖGD_Netzwerk"
+author: "Jakob Schumacher"
+date: "24 März 2019"
+output: html_document
+---
+
+```{r setup}
+suppressWarnings(suppressMessages(library(igraph)))
+suppressWarnings(suppressMessages(library(dplyr)))
+suppressWarnings(suppressMessages(library(networkD3)))
+suppressWarnings(suppressMessages(library(rvest)))
+suppressWarnings(suppressMessages(library(tidyverse)))
+suppressWarnings(suppressMessages(library(stringr)))
+
+setwd(here::here())
+```
+
+```{r}
+# Read in Date from https://service.berlin.de/behoerden/
+#  page <- rvest::read_html("https://service.berlin.de/behoerden/") 
+behoerden <- page %>%
+  html_nodes("a") %>%
+  html_text() %>% 
+  str_subset("\\s{5}") %>% 
+  str_trim() %>% 
+  str_remove("Service-Portal\n                Berlin") %>% 
+  str_subset(".+") 
+
+behoerden <- behoerden %>% as_tibble() %>% sample_n(size = 50) %>% pull()
+
+# Zufallszahl Generierung
+zufallswerte = sample(c(seq(0, 200, by = 18), rep(0, 100)), size = length(behoerden)^2, replace = TRUE)
+edges <- tibble(source = rep(behoerden, length(behoerden)), target = sample(rep(behoerden, length(behoerden))), value = zufallswerte)
+write_csv(edges, "edges.csv")
+
+nodes <- tibble(name = behoerden,size = 100*abs(rpois(length(behoerden), lambda = 0.5)),fullname = behoerden, group = rep("1", length(behoerden)))
+
+write_csv(nodes, "nodes.csv")
+
+```
+
+
+
+```{r}
+# Read in data
+nodes <- read.csv("nodes.csv", sep = ",")
+edges <- read.csv("edges.csv", sep = ",")
+
+
+# Umwandeln der Namen der Nodes in Ziffern
+nodes$id <- c(0:(nrow(nodes) - 1))
+
+
+# Source und Target durch ID ersetzen
+edges <- edges %>% 
+  left_join(nodes %>% 
+              select(name, id) %>% 
+              rename(source = name), by = "source") %>% 
+  select(source = id, value, target) %>% 
+    left_join(nodes %>% 
+              select(name, id) %>% 
+              rename(target = name), by = "target") %>% 
+  select(source, target = id, value) 
+
+# Cut-off für edges$value
+edges <- edges %>% 
+  mutate(value = ifelse(value > 4, value, NA)) %>% 
+  na.omit()
+
+nodes <- nodes %>% 
+  select(id, size, group, fullname )
+
+```
+
+
+```{r}
+# Netzwerk erstellen
+network <- forceNetwork(Links = edges, 
+             Nodes = nodes,
+            Source = "source", 
+            Target = "target",
+            Value = "value", 
+            NodeID = "fullname",
+            Group = "group", 
+            fontSize = 50,
+            Nodesize = "size",
+            linkWidth = JS("function(d) { return Math.sqrt(d.value)}"),
+            charge = -3000,
+            opacity = 0.8,
+            zoom = TRUE) 
+            
+
+# Beschreibung hinzufügen
+network <- network %>% 
+  htmlwidgets::prependContent(htmltools::tags$h1("Entwurf für ein Behörden-Netzwerk. VORSICHT KEINE ECHTEN DATEN")) %>% 
+  htmlwidgets::prependContent(htmltools::tags$p("Knoten = Behörden von Berlin")) %>%  
+  htmlwidgets::prependContent(htmltools::tags$p("Links = Zufallswert")) %>% 
+  htmlwidgets::prependContent(htmltools::tags$p("Zoom mit Strg + Mausrad")) 
+
+# Netzwerk speichern
+#oegd_network
+saveNetwork(network, file = 'index.html')
+
+```
